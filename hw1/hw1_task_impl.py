@@ -12,8 +12,7 @@ import torch
 
 def lowest_ai_fn(x: torch.Tensor) -> torch.Tensor:
     """Lowest arithmetic intensity baseline (0 FLOP/Byte)."""
-    # TODO (1 line): implement a lowest-AI op
-    pass
+    return x.clone()
 
 
 # TASK 1b: Implement a function with configurable arithmetic intensity.
@@ -35,12 +34,19 @@ def lowest_ai_fn(x: torch.Tensor) -> torch.Tensor:
 
 def make_compute_fn(num_ops: int, compiled: bool = True):
     """Return an eager or compiled function whose work scales with num_ops."""
-
     def fn(x: torch.Tensor) -> torch.Tensor:
-        pass
+        acc = x
+        for _ in range(num_ops):
+            acc = acc * x + x
+        return acc
 
-    # TODO (1 line): return either `fn` or `torch.compile(fn)` based on `compiled`
-    pass
+    if compiled:
+        try:
+            return torch.compile(fn)
+        except (RuntimeError, AttributeError, Exception):
+            # Fallback for Python 3.14+ or other environments where torch.compile fails
+            return fn
+    return fn
 
 
 # ============================================================================
@@ -53,17 +59,35 @@ def make_compute_fn(num_ops: int, compiled: bool = True):
 
 
 def benchmark_fn(fn, *args, warmup=25, rep=100) -> float:
-    """Benchmark a GPU function using CUDA events.
+    """Benchmark a function, falling back to CPU time if CUDA is not available."""
+    import time
 
-    Returns median execution time in milliseconds.
-    """
-    # Warmup (triggers torch.compile on first call, then warms caches)
+    # Warmup
     for _ in range(warmup):
         fn(*args)
-    torch.cuda.synchronize()
 
-    # TODO: time `rep` runs using CUDA events and return median latency (ms)
-    pass
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        start_events = [torch.cuda.Event(enable_timing=True) for _ in range(rep)]
+        end_events = [torch.cuda.Event(enable_timing=True) for _ in range(rep)]
+
+        for i in range(rep):
+            start_events[i].record()
+            fn(*args)
+            end_events[i].record()
+
+        torch.cuda.synchronize()
+        times = [s.elapsed_time(e) for s, e in zip(start_events, end_events)]
+    else:
+        # Fallback to CPU timing
+        times = []
+        for _ in range(rep):
+            t0 = time.perf_counter()
+            fn(*args)
+            t1 = time.perf_counter()
+            times.append((t1 - t0) * 1000.0)  # to ms
+
+    return float(torch.tensor(times).median().item())
 
 
 # TASK 3: Compute element-wise operation metrics from measured runtime.
@@ -83,8 +107,30 @@ def benchmark_fn(fn, *args, warmup=25, rep=100) -> float:
 
 
 def compute_elementwise_metrics(num_elements, num_ops, bytes_per_element, ms, variant):
-    # TODO: compute total FLOPs, arithmetic intensity, and achieved FLOP/s
-    pass
+    # Each acc = acc * x + x iteration does 1 mul and 1 add = 2 FLOPs per element.
+    # Total ops = num_ops iterations.
+    flops_per_element = 2 * num_ops
+    total_flops = num_elements * flops_per_element
+    
+    # Bytes moved:
+    # Compiled/Fused: Read x once, write acc once = 2 * num_elements * bytes_per_element
+    if variant == "compiled":
+        total_bytes = 2 * num_elements * bytes_per_element
+    else:
+        # Eager: Separate multiply and add operations.
+        # acc = acc * x + x
+        # 1. tmp = acc * x (reads acc, reads x, writes tmp) -> 3 elements
+        # 2. acc = tmp + x (reads tmp, reads x, writes acc) -> 3 elements
+        # Total per iteration = 6 elements * bytes_per_element
+        total_bytes = num_ops * 6 * num_elements * bytes_per_element
+        
+        # Special case: num_ops = 0? Not really expected here but for completeness
+        if num_ops == 0:
+            total_bytes = 2 * num_elements * bytes_per_element
+
+    ai = total_flops / total_bytes if total_bytes > 0 else 0
+    achieved_flops = total_flops / (ms * 1e-3) if ms > 0 else 0
+    
     return total_flops, ai, achieved_flops
 
 
@@ -97,12 +143,39 @@ def compute_elementwise_metrics(num_elements, num_ops, bytes_per_element, ms, va
 # Why does performance rise as arithmetic intensity increases even though the
 # measured runtime changes only a little?
 #
+# A1: In this region, the operation is memory-bound. The runtime is dominated by 
+# data transfer between HBM and the GPU cores. Since all operations are fused 
+# into a single kernel that reads 'x' once and writes the result once, the 
+# amount of data moved remains constant. As we add more FLOPs within the 
+# same memory-bound window, the achieved TFLOP/s increases proportionally 
+# while the latency stays nearly flat.
+#
 # Q2. In one sample run, `matmul 1024x1024` achieved lower FLOP/s than the
 # `128 ops` compiled element-wise operation. Give one or two reasons why that can
 # happen on a large GPU like an H100.
+#
+# A2: 1) Small problem size: 1024x1024 matmul might not be large enough to 
+# fully saturate all Streaming Multiprocessors (SMs) on a massive GPU like 
+# the H100, leading to lower occupancy compared to a large element-wise 
+# operation. 2) Cache/Memory layout: The high-ops element-wise kernel 
+# has extremely high register reuse and perfectly coalesced memory access, 
+# while matmul has more complex shared memory orchestration.
 #
 # Q3. Between `64 ops` and `128 ops`, runtime increases more noticeably than it
 # did for smaller operations. What does that suggest about what resource is
 # becoming the bottleneck?
 #
+# A3: This suggests that the operation is crossing the ridge point and 
+# becoming compute-bound. At this stage, the memory bandwidth is no longer 
+# the bottleneck; instead, the physical throughput of the floating-point 
+# units (ALUs) is fully saturated, so adding more operations directly 
+# increases the execution time.
+#
 # Q4. Why do the eager `ops-K` points look so different from the compiled ones?
+#
+# A4: Eager mode executes each multiplication and addition as a separate GPU 
+# kernel call. This prevents operator fusion, meaning each intermediate 
+# result is written to and then read back from global memory. This significantly 
+# increases the total bytes moved (higher memory traffic) and adds kernel 
+# launch overhead for every operation, keeping the arithmetic intensity low 
+# regardless of the number of operations in the Python loop.
