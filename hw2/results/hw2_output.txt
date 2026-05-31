@@ -1,0 +1,61 @@
+============================================================
+HW2: LLM Inference Optimization
+Model: Tiny random Llama (2 layers, d_model=2048)
+============================================================
+
+--- Part 1: Slow baseline ---
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                           aten::matmul         0.49%       1.034ms        39.43%      82.814ms     431.321us       0.000us         0.00%      12.859ms      66.976us           192  
+                                           aten::linear         0.25%     514.989us        12.40%      26.050ms     144.722us       0.000us         0.00%      12.805ms      71.139us           180  
+                                               aten::mm         4.07%       8.558ms        10.71%      22.486ms     124.921us      12.428ms        52.19%      12.805ms      71.139us           180  
+                     aten::scaled_dot_product_attention         0.12%     253.054us         1.21%       2.535ms     105.606us       0.000us         0.00%       6.271ms     261.278us            24  
+          aten::_scaled_dot_product_efficient_attention         0.16%     339.920us         1.09%       2.281ms      95.062us       0.000us         0.00%       6.271ms     261.278us            24  
+                     aten::_efficient_attention_forward         0.16%     341.934us         0.81%       1.703ms      70.946us       5.621ms        23.61%       6.271ms     261.278us            24  
+sm90_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize128x1...         0.00%       0.000us         0.00%       0.000us       0.000us       5.729ms        24.06%       5.729ms      83.035us            69  
+fmha_cutlassF_f32_aligned_32x128_gmem_sm80(PyTorchMe...         0.00%       0.000us         0.00%       0.000us       0.000us       5.621ms        23.61%       5.621ms     234.214us            24  
+sm90_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize64x12...         0.00%       0.000us         0.00%       0.000us       0.000us       3.835ms        16.11%       3.835ms      43.584us            88  
+sm90_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize128x1...         0.00%       0.000us         0.00%       0.000us       0.000us       2.687ms        11.28%       2.687ms     122.123us            22  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 210.031ms
+Self CUDA time total: 23.813ms
+
+Slow: 128 tokens in 0.36s (356.2 tok/s)
+Token preview: [775, 1973, 97, 2453, 295, 695, 775, 866]
+
+--- Part 2: Optimized ---
+Warming up optimized model...
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+## Call CompiledFxGraph fediumhy5bjpttra62xoujzuaidi...         0.00%       0.000us         0.00%       0.000us       0.000us      16.180ms       408.17%      16.180ms       1.245ms            13  
+                                       CompiledFunction        17.47%      44.798ms        97.78%     250.796ms      20.900ms       1.776ms        44.80%       3.894ms     324.516us            12  
+                             Torch-Compiled Region: 0/2         0.64%       1.629ms        81.20%     208.261ms      20.826ms       0.000us         0.00%       3.000ms     299.972us            10  
+## Call CompiledFxGraph fediumhy5bjpttra62xoujzuaidi...        35.82%      91.874ms        65.87%     168.945ms      16.895ms       0.000us         0.00%       2.107ms     210.676us            10  
+fmha_cutlassF_bf16_aligned_32x128_gmem_sm80(PyTorchM...         0.00%       0.000us         0.00%       0.000us       0.000us       1.462ms        36.88%       1.462ms      60.920us            24  
+                      nvjet_tst_64x8_64x16_4x1_v_bz_TNT         0.00%       0.000us         0.00%       0.000us       0.000us       1.192ms        30.07%       1.192ms       8.335us           143  
+                                               aten::mm         1.11%       2.856ms         1.42%       3.653ms      19.028us     961.656us        24.26%     961.656us       5.009us           192  
+          aten::_scaled_dot_product_efficient_attention         0.10%     249.992us         0.57%       1.463ms      60.968us       0.000us         0.00%     824.572us      34.357us            24  
+                     aten::_efficient_attention_forward         0.13%     344.197us         0.35%     897.555us      37.398us     824.572us        20.80%     824.572us      34.357us            24  
+## Call CompiledFxGraph fg3nhy6ok74wdmv5kfjjqsh2wzto...         0.00%       0.000us         0.00%       0.000us       0.000us     595.774us        15.03%     595.774us     297.887us             2  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 256.486ms
+Self CUDA time total: 3.964ms
+
+Optimized: 128 tokens in 1.95s (65.5 tok/s)
+Token preview: [775, 1973, 97, 2453, 295, 695, 775, 866]
+
+--- Part 3: Final Optimized (Enhanced) ---
+Warming up final optimized model...
+Final Optimized: 128 tokens in 1.01s (127.0 tok/s)
+Token preview: [775, 1973, 97, 2453, 295, 695, 775, 866]
+
+============================================================
+SUMMARY
+============================================================
+  Slow:              0.36s
+  Optimized (v1):    1.95s (  0.18x)
+  Optimized (v2):    1.01s (  0.36x)
+
+  Improvement v2 vs v1: 1.94x
