@@ -143,39 +143,43 @@ def compute_elementwise_metrics(num_elements, num_ops, bytes_per_element, ms, va
 # Why does performance rise as arithmetic intensity increases even though the
 # measured runtime changes only a little?
 #
-# A1: In this region, the operation is memory-bound. The runtime is dominated by 
-# data transfer between HBM and the GPU cores. Since all operations are fused 
-# into a single kernel that reads 'x' once and writes the result once, the 
-# amount of data moved remains constant. As we add more FLOPs within the 
-# same memory-bound window, the achieved TFLOP/s increases proportionally 
-# while the latency stays nearly flat.
+# A1: In this region (1 to 64 ops), the operation is strictly memory-bound. The 
+# measured runtime remains nearly constant at ~0.18 ms because it is limited 
+# by the GPU's HBM bandwidth (achieving ~2.96 TB/s in our data). Since we are 
+# moving the same amount of data (reading 'x' and writing 'acc' once) while 
+# increasing the number of FLOPs performed on that data, the achieved TFLOP/s 
+# rises linearly with arithmetic intensity while the latency stays flat.
 #
 # Q2. In one sample run, `matmul 1024x1024` achieved lower FLOP/s than the
 # `128 ops` compiled element-wise operation. Give one or two reasons why that can
 # happen on a large GPU like an H100.
 #
-# A2: 1) Small problem size: 1024x1024 matmul might not be large enough to 
-# fully saturate all Streaming Multiprocessors (SMs) on a massive GPU like 
-# the H100, leading to lower occupancy compared to a large element-wise 
-# operation. 2) Cache/Memory layout: The high-ops element-wise kernel 
-# has extremely high register reuse and perfectly coalesced memory access, 
-# while matmul has more complex shared memory orchestration.
+# A2: Our data shows the 128-ops element-wise operation reaching ~60.3 TFLOPS, 
+# while the 1024x1024 matmul only hits ~36.9 TFLOPS. This happens because: 
+# 1) Low Occupancy: A 1024x1024 matrix multiplication (2^20 elements) 
+# does not provide enough thread blocks to fully saturate the massive number 
+# of SMs on an H100. 2) Specialized vs. General: The element-wise kernel 
+# has extremely high register reuse and simple, perfectly coalesced memory 
+# access patterns compared to the shared memory and tiling overheads 
+# inherent in GEMM.
 #
 # Q3. Between `64 ops` and `128 ops`, runtime increases more noticeably than it
 # did for smaller operations. What does that suggest about what resource is
 # becoming the bottleneck?
 #
-# A3: This suggests that the operation is crossing the ridge point and 
-# becoming compute-bound. At this stage, the memory bandwidth is no longer 
-# the bottleneck; instead, the physical throughput of the floating-point 
-# units (ALUs) is fully saturated, so adding more operations directly 
-# increases the execution time.
+# A3: The runtime jumps from ~0.18 ms at 64 ops to ~0.28 ms at 128 ops. This 
+# indicates we have crossed the "ridge point" of the roofline and the 
+# kernel has transitioned from being memory-bound to compute-bound. 
+# At this point, the throughput of the floating-point units (ALUs) 
+# becomes the bottleneck, so doubling the work (from 64 to 128 ops) now 
+# results in a significant increase in execution time.
 #
 # Q4. Why do the eager `ops-K` points look so different from the compiled ones?
 #
-# A4: Eager mode executes each multiplication and addition as a separate GPU 
-# kernel call. This prevents operator fusion, meaning each intermediate 
-# result is written to and then read back from global memory. This significantly 
-# increases the total bytes moved (higher memory traffic) and adds kernel 
-# launch overhead for every operation, keeping the arithmetic intensity low 
-# regardless of the number of operations in the Python loop.
+# A4: Eager mode fails to fuse the operations, launching separate kernels for 
+# each addition and multiplication in the loop. This results in: 
+# 1) Massive Memory Traffic: Intermediate results are written to and read 
+# from VRAM, keeping arithmetic intensity extremely low (~0.083 FLOP/Byte 
+# in our results). 2) Launch Overhead: The cumulative overhead of 
+# launching hundreds of separate kernels dominates the runtime, as seen 
+# in the high latency (~67 ms for 128 eager ops vs 0.28 ms for compiled).
