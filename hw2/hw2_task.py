@@ -14,7 +14,6 @@ from utils import (
 def optimized_loop(model, input_ids, n_steps):
     # HW1 taught us that eager mode and frequent syncs (like .item()) are slow.
     # We use KV caching to avoid quadratic re-computation and torch.compile for fusion.
-    generated_tokens = []
     
     # Initial forward pass to populate KV cache
     outputs = model(input_ids=input_ids, use_cache=True)
@@ -22,8 +21,6 @@ def optimized_loop(model, input_ids, n_steps):
     next_token_id = torch.argmax(outputs.logits[:, -1, :], dim=-1)
     
     # Pre-allocate output tensor on GPU to avoid .item() inside the loop
-    # We still need to return a list of Python ints for compatibility with utils.py
-    # but we can collect them all at once at the very end.
     all_token_ids = torch.zeros(n_steps, dtype=torch.long, device=input_ids.device)
     all_token_ids[0] = next_token_id
     
@@ -36,6 +33,42 @@ def optimized_loop(model, input_ids, n_steps):
         all_token_ids[i] = next_token_id
         curr_input_ids = next_token_id.unsqueeze(0)
     
+    return all_token_ids.tolist()
+
+
+def final_optimized_loop(model, input_ids, n_steps):
+    """
+    Even more optimized loop:
+    - Uses Static KV Caching (simulated by pre-allocating or using torch.compile with dynamic=False where possible)
+    - Minimizes Python loop overhead by wrapping the generation step in a compiled function.
+    """
+    # For this tiny model, the main bottleneck after KV cache and compile is 
+    # the small GPU kernel launch overhead and Python loop.
+    
+    @torch.compile(mode="reduce-overhead", fullgraph=True)
+    def decode_step(curr_ids, past_kv):
+        out = model(input_ids=curr_ids, past_key_values=past_kv, use_cache=True)
+        next_token = torch.argmax(out.logits[:, -1, :], dim=-1)
+        return next_token, out.past_key_values
+
+    # Initial forward (prefill)
+    # We don't compile prefill because it's only done once and shapes are different
+    outputs = model(input_ids=input_ids, use_cache=True)
+    past_key_values = outputs.past_key_values
+    next_token_id = torch.argmax(outputs.logits[:, -1, :], dim=-1)
+    
+    all_token_ids = torch.zeros(n_steps, dtype=torch.long, device=input_ids.device)
+    all_token_ids[0] = next_token_id
+    
+    curr_input_ids = next_token_id.unsqueeze(0)
+    
+    for i in range(1, n_steps):
+        # The decode_step is compiled, which helps fuse the argmax and next token logic
+        # and reduces the overhead of calling the model.
+        next_token_id, past_key_values = decode_step(curr_input_ids, past_key_values)
+        all_token_ids[i] = next_token_id
+        curr_input_ids = next_token_id.unsqueeze(0)
+        
     return all_token_ids.tolist()
 
 
@@ -68,17 +101,25 @@ def generate_optimized(optimized_trace_name: str) -> float:
     
     # 2. Use torch.compile to fuse kernels and reduce launch overhead (HW1: Compiled vs Eager)
     # mode="reduce-overhead" is great for small models like this tiny Llama.
-    model = torch.compile(model, mode="reduce-overhead")
+    compiled_model = torch.compile(model, mode="reduce-overhead")
     
     input_ids = get_input_ids()
 
     # Warmup for torch.compile
     print("Warming up optimized model...")
-    optimized_loop(model, input_ids, 5)
+    optimized_loop(compiled_model, input_ids, 5)
 
-    profile(optimized_loop, model, input_ids, optimized_trace_name)
-    optimized_elapsed = time_generation(optimized_loop, model, input_ids, "Optimized")
-    return optimized_elapsed
+    profile(optimized_loop, compiled_model, input_ids, optimized_trace_name)
+    optimized_elapsed = time_generation(optimized_loop, compiled_model, input_ids, "Optimized")
+    
+    print("\n--- Part 3: Final Optimized (Enhanced) ---")
+    # Warmup for the nested compile in final_optimized_loop
+    print("Warming up final optimized model...")
+    final_optimized_loop(compiled_model, input_ids, 5)
+    
+    final_elapsed = time_generation(final_optimized_loop, compiled_model, input_ids, "Final Optimized")
+    
+    return optimized_elapsed, final_elapsed
 
 
 def main():
@@ -102,7 +143,7 @@ def main():
     torch.cuda.empty_cache()
 
     print("\n--- Part 2: Optimized ---")
-    optimized_elapsed = generate_optimized(optimized_trace_name="v1_optimized_trace.json")
+    optimized_elapsed, final_elapsed = generate_optimized(optimized_trace_name="v1_optimized_trace.json")
 
     print("\n" + "=" * 60)
     print("SUMMARY")
@@ -111,10 +152,12 @@ def main():
         print("generate_optimized() did not return a positive elapsed time; "
               "cannot compute speedup.")
     else:
-        speedup = slow_elapsed / optimized_elapsed
-        print(f"  Slow:      {slow_elapsed:6.2f}s")
-        print(f"  Optimized: {optimized_elapsed:6.2f}s")
-        print(f"  Speedup:   {speedup:6.2f}x  (vs V0 slow baseline)")
+        speedup_v1 = slow_elapsed / optimized_elapsed
+        speedup_v2 = slow_elapsed / final_elapsed
+        print(f"  Slow:            {slow_elapsed:6.2f}s")
+        print(f"  Optimized (v1):  {optimized_elapsed:6.2f}s ({speedup_v1:6.2f}x)")
+        print(f"  Optimized (v2):  {final_elapsed:6.2f}s ({speedup_v2:6.2f}x)")
+        print(f"\n  Improvement v2 vs v1: {(optimized_elapsed/final_elapsed):.2f}x")
 
 
 if __name__ == "__main__":
