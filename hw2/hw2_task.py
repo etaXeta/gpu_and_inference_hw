@@ -39,21 +39,18 @@ def optimized_loop(model, input_ids, n_steps):
 
 
 def profile(loop_fn, model, input_ids, trace_name: str):
-    # TODO: wrap loop_fn(model, input_ids, PROFILE_STEPS) with torch.profiler,
+    # HW2: wrap loop_fn(model, input_ids, PROFILE_STEPS) with torch.profiler,
     # print the summary table, and export a Chrome trace to RESULTS_DIR / trace_name
     with torch.profiler.profile(
         activities=[
             torch.profiler.ProfilerActivity.CPU,
             torch.profiler.ProfilerActivity.CUDA,
         ],
-        on_trace_ready=torch.profiler.tensorboard_trace_handler(str(RESULTS_DIR)),
         record_shapes=True,
         with_stack=True,
     ) as prof:
         loop_fn(model, input_ids, PROFILE_STEPS)
 
-    # Rename the trace file to the desired name
-    # torch.profiler produces a .json.gz usually, or we can use export_chrome_trace
     prof.export_chrome_trace(str(RESULTS_DIR / trace_name))
     print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
 
