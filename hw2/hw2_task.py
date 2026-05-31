@@ -1,4 +1,5 @@
 import torch
+import torch._inductor.config
 from utils import (
     build_model,
     get_input_ids,
@@ -85,7 +86,6 @@ def main():
     if torch.cuda.is_available():
         torch.set_float32_matmul_precision('high')
         # Silence CUDA Graph warning about dynamic shapes
-        import torch._inductor.config
         torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit = None
 
     print("=" * 60)
