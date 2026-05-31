@@ -41,18 +41,23 @@ def optimized_loop(model, input_ids, n_steps):
 def profile(loop_fn, model, input_ids, trace_name: str):
     # HW2: wrap loop_fn(model, input_ids, PROFILE_STEPS) with torch.profiler,
     # print the summary table, and export a Chrome trace to RESULTS_DIR / trace_name
+    
+    activities = [torch.profiler.ProfilerActivity.CPU]
+    if torch.cuda.is_available():
+        activities.append(torch.profiler.ProfilerActivity.CUDA)
+
     with torch.profiler.profile(
-        activities=[
-            torch.profiler.ProfilerActivity.CPU,
-            torch.profiler.ProfilerActivity.CUDA,
-        ],
+        activities=activities,
         record_shapes=True,
         with_stack=True,
     ) as prof:
         loop_fn(model, input_ids, PROFILE_STEPS)
 
     prof.export_chrome_trace(str(RESULTS_DIR / trace_name))
-    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+    
+    # Use cpu_time_total if CUDA is not available to avoid sorting error
+    sort_by = "cuda_time_total" if torch.cuda.is_available() else "cpu_time_total"
+    print(prof.key_averages().table(sort_by=sort_by, row_limit=10))
 
 
 def generate_optimized(optimized_trace_name: str) -> float:
@@ -76,6 +81,13 @@ def generate_optimized(optimized_trace_name: str) -> float:
 
 
 def main():
+    # Set TF32 precision for better performance on Ampere+ GPUs
+    if torch.cuda.is_available():
+        torch.set_float32_matmul_precision('high')
+        # Silence CUDA Graph warning about dynamic shapes
+        import torch._inductor.config
+        torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit = None
+
     print("=" * 60)
     print("HW2: LLM Inference Optimization")
     print(f"Model: {MODEL_NAME}")
@@ -121,6 +133,8 @@ if __name__ == "__main__":
 # 3. Eliminated .item() Syncs: Kept token IDs on GPU during the loop and used `.tolist()` at the very end. 
 #    This prevents frequent CPU-GPU synchronization bubbles.
 # 4. torch.compile: Used `torch.compile(mode="reduce-overhead")` to fuse kernels and eliminate Python/framework overhead.
+# 5. CUDA Graph Config: Suppressed dynamic shape warnings in Inductor to maintain clean output while allowing 
+#    re-capturing graphs for growing KV cache sequences.
 #
 # Biggest impact and why:
 # KV Caching had the biggest impact. Without it, the model re-processes the entire prompt and all 
