@@ -1,0 +1,62 @@
+﻿============================================================
+HW3: Mini Inference Engine
+============================================================
+
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  Prefill-Heavy  (80 requests)
+
+
+  No prefix cache
+    Steps                    : 697
+    Throughput (tok/step)    : 10.58
+    TTFT mean / p95 (steps)  : 233.0 / 483.8
+    E2E latency mean (steps) : 360.6
+    Preemptions              : 91
+    Prefix cache hit rate    : 0.0%  (0 tokens saved)
+
+  Prefix cache ON
+    Steps                    : 275
+    Throughput (tok/step)    : 26.82
+    TTFT mean / p95 (steps)  : 48.4 / 86.1
+    E2E latency mean (steps) : 152.2
+    Preemptions              : 23
+    Prefix cache hit rate    : 51.1%  (12032 tokens saved)
+
+    Steps: 697 ΓåÆ 275  (2.53├ù fewer)
+    TTFT:  233.0 ΓåÆ 48.4 steps
+
+  Scheduling policy (cache ON)
+    Prefill-first steps / TTFT / E2E : 275 / 48.4 / 152.2
+    Decode-first  steps / TTFT / E2E : 409 / 100.4 / 191.6
+
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  Decode-Heavy  (50 requests)
+
+
+  No prefix cache
+    Steps                    : 1511
+    Throughput (tok/step)    : 9.87
+    TTFT mean / p95 (steps)  : 737.7 / 1035.6
+    E2E latency mean (steps) : 1084.2
+    Preemptions              : 273
+    Prefix cache hit rate    : 0.0%  (0 tokens saved)
+
+  Prefix cache ON
+    Steps                    : 1120
+    Throughput (tok/step)    : 13.32
+    TTFT mean / p95 (steps)  : 379.4 / 611.9
+    E2E latency mean (steps) : 717.5
+    Preemptions              : 139
+    Prefix cache hit rate    : 9.7%  (1568 tokens saved)
+
+    Steps: 1511 ΓåÆ 1120  (1.35├ù fewer)
+    TTFT:  737.7 ΓåÆ 379.4 steps
+
+  Scheduling policy (cache ON)
+    Prefill-first steps / TTFT / E2E : 1120 / 379.4 / 717.5
+    Decode-first  steps / TTFT / E2E : 1105 / 442.2 / 739.5
+
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+
+  Plot ΓåÆ C:\Users\prita\Documents\GitHub\gpu_and_inference_hw\hw3\results\hw3_results.png
+  Policy plot ΓåÆ C:\Users\prita\Documents\GitHub\gpu_and_inference_hw\hw3\results\hw3_policy_results.png
